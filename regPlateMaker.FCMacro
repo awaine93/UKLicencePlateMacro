@@ -1,0 +1,146 @@
+import FreeCAD as App
+import FreeCADGui
+import Draft
+import Mesh
+import PartDesign
+from pprint import pprint
+
+## ******************** Variables **********************
+## TODO: Find out if macros can take in parameters
+input = "m4d h4ttr"
+regPlateFontFile = "/home/laptop/fonts/UKNumberPlate.ttf"
+specialChars = ['1', 'I']
+
+
+doc = App.newDocument()
+whitespacePos = input.find(" ")
+print(whitespacePos)
+
+## ******************** Charecter/string creation **********************
+
+def charToShapeString(letter, index):
+    letter = letter.upper()
+    shapeStringObj = Draft.make_shapestring(letter, regPlateFontFile, 20)
+
+    ## If the charecter is I or 1 factor in the spacing required to replicate a license plate design
+    ## The spcaing is needed becuase without correction the i and the 1 charecters sit far left of their position due to their slim nature
+    if letter in specialChars:
+        indexPos = (15 * index) + (12.5)
+    else:
+        indexPos = (15 * index) + (7.5)
+
+    ## If the current charecter is after the white space, factor the
+    ## whitespace into the charecter positioning by adding 15 to the letters position
+    ## this is to replicate the input sting and the license plate design
+    ## Index is the key to the charecter in the input string
+    if(whitespacePos > 0):
+      if index >= whitespacePos:
+        indexPos = indexPos + 15
+    
+    shapeStringObj.Placement.Base = App.Vector(indexPos, 2, 5)
+    FreeCADGui.ActiveDocument.getObject(shapeStringObj.Name).Visibility = False
+    return shapeStringObj
+
+def createBodyWithShapeString(shapeString,index):
+  bodyName = 'Body'+str(index)
+  doc.addObject('PartDesign::Body',bodyName)
+  bodyObj = doc.getObject(bodyName)  
+  bodyObj.BaseFeature = shapeString
+  return bodyObj
+
+def createPadFromBody(body,index):
+  padName = 'Pad'+str(index)
+  pad = body.Document.addObject("PartDesign::Pad",padName)
+  body.addObject(pad)
+  pad.Length = 3
+  pad.Profile = body.BaseFeature
+  return pad
+  
+
+## This loops over the charecters in the given input string and runs each step needed 
+## to make a pad individualy on the charecter (c). This is becuase FreeCad cannot create
+## a pad from multiple solids in one body/basefeature, meaning if their are two or more 
+## seperate (shapes not connecting to one another) letters in the shapeString it will fail
+def generateSolidsFromInput(string):
+  index = 0
+  string = string.replace(" ", "")
+  charCount = len(string)
+  padArry = []
+  print("charCount:"+str(charCount))
+  print("string:"+string)
+  for c in string:  
+    shapeString = charToShapeString(c,index)
+    body = createBodyWithShapeString(shapeString,index)
+    pad = createPadFromBody(body,index)
+    index +=1
+    padArry.append(pad)
+  return padArry
+
+
+## ******************** Backplate creation **********************
+
+
+def createBackplateBox():
+  backplateBox = doc.addObject("Part::Box","backplateBox")
+  backplateBox.Height = 5
+  backplateBox.Width = 25
+
+  string = input.replace(" ", "")
+  charCount = len(string)
+  if whitespacePos > 1:
+    backplateBox.Length = (15*charCount)+30
+  else:
+    backplateBox.Length = (15*charCount)+15
+  backplateBox.Visibility = False
+  return backplateBox
+
+def createBackplateBody(backplateBox):
+  doc.addObject('PartDesign::Body',"backplateBody")
+  backplateBody = doc.getObject("backplateBody")  
+  backplateBody.BaseFeature = backplateBox
+  return backplateBody
+
+def filletBackplate(backplateBody):
+  backplateBody.newObject('PartDesign::Fillet','backplateFillet')
+  backplateFillet = doc.getObject('backplateFillet')
+  backplateFillet.Base = (doc.getObject(backplateBody.BaseFeature.Name),['Edge7','Edge5','Edge3','Edge1',])
+  backplateFillet.Radius = '2.00 mm'
+  return backplateFillet
+
+def createBackplate():
+  backplateBox =   createBackplateBox()
+  backplateBody = createBackplateBody(backplateBox)
+  backplateFillet = filletBackplate(backplateBody)
+  return backplateFillet
+
+
+## ******************** Fuse Objects **********************
+def fuseObjects(shapes):
+    doc.addObject("Part::MultiFuse","Fusion")
+    fusion = doc.Fusion.Shapes = shapes
+    return fusion
+    
+## ******************** Save and export **********************
+def exportStl(fusion):
+  __objs__=[]
+  __objs__.append(FreeCAD.getDocument("Unnamed").getObject("Fusion"))
+  string = input.replace(" ","_")
+  Mesh.export(__objs__,u"/home/laptop/Desktop/numberPlates/"+string+".stl")
+  del __objs__
+
+## ******************** Main entry  **********************
+
+padArry = generateSolidsFromInput(input)
+backplateFillet = createBackplate()
+shapes = padArry
+shapes.insert(0,backplateFillet)
+pprint(shapes)
+fusion = fuseObjects(shapes)
+
+## TODO :: Save document file to given folder (probably a number plate dedicated one)
+
+exportStl(fusion);
+## TODO :: Check / configure dimensions to be a good scale between objects on here (it can be resized to desiered print size in slicing software)
+## TODO :: run on command line, including passing in parameters
+
+doc.recompute()
