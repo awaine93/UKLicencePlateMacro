@@ -7,9 +7,10 @@ from pprint import pprint
 
 ## ******************** Variables **********************
 ## TODO: Find out if macros can take in parameters
-input = "m4d h4ttr"
-regPlateFontFile = "/home/laptop/fonts/UKNumberPlate.ttf"
+input = "R1C4RD G4SK1N"
+regPlateFontFile = "/home/baine101/fonts/UKNumberPlate.ttf"
 specialChars = ['1', 'I']
+afterSpecialChars = ['C', 'N']
 
 
 doc = App.newDocument()
@@ -17,34 +18,34 @@ whitespacePos = input.find(" ")
 print(whitespacePos)
 
 ## ******************** Charecter/string creation **********************
+lastCharecterPos = 5
+
 
 def charToShapeString(letter, index):
     letter = letter.upper()
-    shapeStringObj = Draft.make_shapestring(letter, regPlateFontFile, 20)
-
-    ## If the charecter is I or 1 factor in the spacing required to replicate a license plate design
-    ## The spcaing is needed becuase without correction the i and the 1 charecters sit far left of their position due to their slim nature
-    if letter in specialChars:
-        indexPos = (15 * index) + (12.5)
-    else:
-        indexPos = (15 * index) + (7.5)
+    shapeStringObj = Draft.make_shapestring(letter, regPlateFontFile, 12.5)
+    global lastCharecterPos
+  
+    indexPos = lastCharecterPos + 2
+    lastCharecterPos = indexPos + shapeStringObj.Shape.BoundBox.XLength
+    print(lastCharecterPos)	
 
     ## If the current charecter is after the white space, factor the
-    ## whitespace into the charecter positioning by adding 15 to the letters position
+    ## whitespace into the charecter positioning by adding 10 to the letters position
     ## this is to replicate the input sting and the license plate design
     ## Index is the key to the charecter in the input string
     if(whitespacePos > 0):
       if index >= whitespacePos:
-        indexPos = indexPos + 15
-    
-    shapeStringObj.Placement.Base = App.Vector(indexPos, 2, 5)
+        indexPos = indexPos + 5
+
+    shapeStringObj.Placement.Base = App.Vector(indexPos, 1, 2.2)
     FreeCADGui.ActiveDocument.getObject(shapeStringObj.Name).Visibility = False
     return shapeStringObj
 
 def createBodyWithShapeString(shapeString,index):
   bodyName = 'Body'+str(index)
   doc.addObject('PartDesign::Body',bodyName)
-  bodyObj = doc.getObject(bodyName)  
+  bodyObj = doc.getObject(bodyName)
   bodyObj.BaseFeature = shapeString
   return bodyObj
 
@@ -52,14 +53,14 @@ def createPadFromBody(body,index):
   padName = 'Pad'+str(index)
   pad = body.Document.addObject("PartDesign::Pad",padName)
   body.addObject(pad)
-  pad.Length = 3
+  pad.Length = 1.5
   pad.Profile = body.BaseFeature
   return pad
-  
 
-## This loops over the charecters in the given input string and runs each step needed 
+
+## This loops over the charecters in the given input string and runs each step needed
 ## to make a pad individualy on the charecter (c). This is becuase FreeCad cannot create
-## a pad from multiple solids in one body/basefeature, meaning if their are two or more 
+## a pad from multiple solids in one body/basefeature, meaning if their are two or more
 ## seperate (shapes not connecting to one another) letters in the shapeString it will fail
 def generateSolidsFromInput(string):
   index = 0
@@ -68,7 +69,7 @@ def generateSolidsFromInput(string):
   padArry = []
   print("charCount:"+str(charCount))
   print("string:"+string)
-  for c in string:  
+  for c in string:
     shapeString = charToShapeString(c,index)
     body = createBodyWithShapeString(shapeString,index)
     pad = createPadFromBody(body,index)
@@ -81,22 +82,24 @@ def generateSolidsFromInput(string):
 
 
 def createBackplateBox():
+  global lastCharecterPos
   backplateBox = doc.addObject("Part::Box","backplateBox")
-  backplateBox.Height = 5
-  backplateBox.Width = 25
+  backplateBox.Height = 2.5
+  backplateBox.Width = 15
 
   string = input.replace(" ", "")
   charCount = len(string)
   if whitespacePos > 1:
-    backplateBox.Length = (15*charCount)+30
+  ##backplateBox.Length = (10*charCount)+12.5
+    backplateBox.Length = lastCharecterPos+12.5
   else:
-    backplateBox.Length = (15*charCount)+15
+    backplateBox.Length = lastCharecterPos+7.5
   backplateBox.Visibility = False
   return backplateBox
 
 def createBackplateBody(backplateBox):
   doc.addObject('PartDesign::Body',"backplateBody")
-  backplateBody = doc.getObject("backplateBody")  
+  backplateBody = doc.getObject("backplateBody")
   backplateBody.BaseFeature = backplateBox
   return backplateBody
 
@@ -113,34 +116,55 @@ def createBackplate():
   backplateFillet = filletBackplate(backplateBody)
   return backplateFillet
 
+def addKeyringCylinder():
+    cylinder = doc.addObject("Part::Cylinder","keyringHole")
+    cylinder.Placement.Base = App.Vector(3.00,7.50,0.00)
+    cylinder.Radius = '1.75 mm'
+    return cylinder
+
+
 
 ## ******************** Fuse Objects **********************
 def fuseObjects(shapes):
     doc.addObject("Part::MultiFuse","Fusion")
     fusion = doc.Fusion.Shapes = shapes
     return fusion
-    
+
 ## ******************** Save and export **********************
 def exportStl(fusion):
   __objs__=[]
   __objs__.append(FreeCAD.getDocument("Unnamed").getObject("Fusion"))
   string = input.replace(" ","_")
-  Mesh.export(__objs__,u"/home/laptop/Desktop/numberPlates/"+string+".stl")
+  fusion.shape.exportStl("/home/laptop/Desktop/numberPlates/"+string+".stl")
+  #Mesh.export(__objs__,u"/home/laptop/Desktop/numberPlates/"+string+".stl")
   del __objs__
+
+
+def cutKeyringHole():
+  cut = doc.addObject("Part::Cut","Cut")
+  cut.Base=backplateFillet
+  cut.Tool=keyringCylinder
+  keyringCylinder.ViewObject.Visibility=False
+  backplateFillet.ViewObject.Visibility=False
+  return cut
 
 ## ******************** Main entry  **********************
 
 padArry = generateSolidsFromInput(input)
 backplateFillet = createBackplate()
+keyringCylinder = addKeyringCylinder()
+
+cut = cutKeyringHole()
+
 shapes = padArry
-shapes.insert(0,backplateFillet)
+shapes.insert(0,cut)
 pprint(shapes)
 fusion = fuseObjects(shapes)
 
-## TODO :: Save document file to given folder (probably a number plate dedicated one)
-
-exportStl(fusion);
 ## TODO :: Check / configure dimensions to be a good scale between objects on here (it can be resized to desiered print size in slicing software)
 ## TODO :: run on command line, including passing in parameters
 
 doc.recompute()
+
+exportStl(fusion);
+
